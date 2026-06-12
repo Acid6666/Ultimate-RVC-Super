@@ -7,6 +7,16 @@ uv/*
 uv.lock
 !src/ultimate_rvc/rvc/lib/*
 
+# Virtual environment
+.venv/
+
+# Output and logs
+outputs/
+logs/
+
+# Images
+images/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

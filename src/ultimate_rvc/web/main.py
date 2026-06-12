@@ -13,6 +13,10 @@ from typing import Annotated
 
 import os
 from pathlib import Path
+import gc
+import threading
+import time
+import logging
 
 import gradio as gr
 
@@ -56,6 +60,126 @@ config_name = os.environ.get("URVC_CONFIG")
 cookiefile = os.environ.get("YT_COOKIEFILE")
 total_config = load_config(config_name, TotalConfig) if config_name else TotalConfig()
 
+# 空闲超时监控配置
+IDLE_TIMEOUT = 300  # 5分钟 = 300秒
+last_request_time = None
+timeout_thread = None
+should_stop_timeout = False
+memory_cleanup_lock = threading.Lock()
+torch_available = None
+_voice_converter = None  # 全局缓存 VoiceConverter 对象
+
+# # 尝试导入 torch（Ultimate RVC 使用 PyTorch）
+# try:
+#     import torch
+#     torch_available = torch
+#     logger = logging.getLogger("UltimateRVC")
+#     logger.setLevel(logging.INFO)
+# except ImportError:
+#     torch_available = None
+#     logger = None
+
+# 延迟导入torch：启动时不初始化，首次使用时再导入
+torch_available = None  # 全局标记，记录torch是否可用
+logger = logging.getLogger("UltimateRVC")  # 提前初始化logger（不依赖torch）
+logger.setLevel(logging.INFO)
+
+def get_torch():
+    """延迟导入torch的工具函数：首次调用时才导入，避免启动时创建CUDA上下文"""
+    global torch_available
+    if torch_available is None:  # 只导入一次
+        try:
+            import torch
+            torch_available = torch  # 导入成功，存为torch模块
+            logger.info("PyTorch 已成功导入")
+        except ImportError:
+            torch_available = False  # 导入失败，标记为False
+            logger.error("PyTorch 导入失败，部分功能将不可用")
+    return torch_available if torch_available is not False else None
+
+def update_last_request_time():
+    """更新最后请求时间"""
+    global last_request_time
+    last_request_time = time.time()
+    if logger:
+        logger.info(f"请求时间已更新")
+
+
+def cleanup_memory():
+    """清理 CUDA 缓存、卸载模型和 Python 垃圾回收"""
+    try:
+        with memory_cleanup_lock:
+            # 清理缓存的 VoiceConverter 对象
+            global _voice_converter
+            if _voice_converter is not None:
+                if logger:
+                    logger.info("开始卸载模型...")
+                # 调用 cleanup_model 释放模型
+                _voice_converter.cleanup_model()
+                _voice_converter = None
+                if logger:
+                    logger.info("模型已卸载")
+
+            # 清理 Python 函数缓存（包括 _get_voice_converter 的缓存）
+            from ultimate_rvc.core.generate.common import _get_voice_converter
+            _get_voice_converter.cache_clear()
+            if logger:
+                logger.info("函数缓存已清除")
+
+            # 清理 CUDA 缓存（通过延迟导入函数获取torch）
+            torch = get_torch()
+            if torch and torch.cuda.is_available():
+                # 强制释放所有缓存
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                torch.cuda.synchronize()
+                logger.info("CUDA 缓存已清理，已释放 %.2f MB" % (
+                    torch.cuda.memory_allocated() / 1024 / 1024
+                ))
+
+            # 强制垃圾回收
+            gc.collect()
+            if logger:
+                logger.info("Python 垃圾回收已完成")
+    except Exception as e:
+        if logger:
+            logger.error(f"内存清理失败: {e}")
+
+
+def timeout_monitor():
+    """超时监控线程，定期清理缓存"""
+    global last_request_time, should_stop_timeout
+
+    if logger:
+        logger.info(f"超时监控线程已启动，超时阈值: {IDLE_TIMEOUT} 秒")
+
+    # 启动时先进行一次清理
+    cleanup_memory()
+
+    while not should_stop_timeout:
+        try:
+            if last_request_time is not None:
+                idle_time = time.time() - last_request_time
+                if idle_time > IDLE_TIMEOUT:
+                    if logger:
+                        logger.info(f"空闲 {idle_time:.0f} 秒，超过 {IDLE_TIMEOUT} 秒阈值，开始清理内存")
+                    cleanup_memory()
+                    last_request_time = None
+            else:
+                # 如果没有活动记录，也尝试清理
+                cleanup_memory()
+        except Exception as e:
+            if logger:
+                logger.error(f"超时监控错误: {e}")
+
+        # 每30秒检查一次
+        time.sleep(30)
+
+    # 线程退出前再清理一次
+    cleanup_memory()
+    if logger:
+        logger.info("超时监控线程已停止")
+
 
 def render_app() -> gr.Blocks:
     """
@@ -75,8 +199,9 @@ def render_app() -> gr.Blocks:
     #audio-tab-button { font-weight: bold !important;}
     #settings-tab-button { font-weight: bold !important;}
     """
-    cache_delete_frequency = 86400  # every 24 hours check for files to delete
-    cache_delete_cutoff = 86400  # and delete files older than 24 hours
+    # 优化：将缓存清理时间设置为 5 分钟（300秒），以释放内存
+    cache_delete_frequency = 300  # 每5分钟检查一次缓存
+    cache_delete_cutoff = 300  # 删除5分钟前的缓存文件
 
     with gr.Blocks(
         title="Ultimate RVC",
@@ -190,6 +315,9 @@ def _init_dropdowns() -> list[gr.Dropdown]:
         default values.
 
     """
+    # 追踪请求活动
+    update_last_request_time()
+
     # Initialize model dropdowns
     edge_tts_models = initialize_dropdowns(
         get_edge_tts_voice_names,
@@ -285,12 +413,21 @@ def start_app(
     ] = False,
 ) -> None:
     """Run the Ultimate RVC web application."""
+    global timeout_thread
+
+    # 启动超时监控线程
+    timeout_thread = threading.Thread(target=timeout_monitor, daemon=True)
+    timeout_thread.start()
+
+    if logger:
+        logger.info(f"Ultimate RVC 服务已启动，空闲超时: {IDLE_TIMEOUT} 秒")
+
     os.environ["GRADIO_TEMP_DIR"] = str(TEMP_DIR)
     gr.set_static_paths([MODELS_DIR, AUDIO_DIR])
     app.queue()
     app.launch(
         share=share,
-        server_name=(None if not listen else (listen_host or "0.0.0.0")),  # noqa: S104
+        server_name=(None if not listen else (listen_host or "172.22.14.2")),  # noqa: S104
         server_port=listen_port,
         ssr_mode=ssr_mode,
     )

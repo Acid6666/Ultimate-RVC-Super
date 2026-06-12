@@ -470,16 +470,40 @@ class VoiceConverter:
         """
         Cleans up the model and releases resources.
         """
-        if self.hubert_model is not None:
-            del self.net_g, self.n_spk, self.vc, self.hubert_model, self.tgt_sr
-            self.hubert_model = self.net_g = self.n_spk = self.vc = self.tgt_sr = None
+        try:
+            import gc
+
+            # 释放所有模型对象
+            if self.hubert_model is not None:
+                self.hubert_model = None
+
+            if self.net_g is not None:
+                self.net_g = None
+
+            if self.n_spk is not None:
+                self.n_spk = None
+
+            if self.vc is not None:
+                self.vc = None
+
+            if self.tgt_sr is not None:
+                self.tgt_sr = None
+
+            if self.cpt is not None:
+                self.cpt = None
+
+            # 清理 CUDA 缓存
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+                torch.cuda.synchronize()
 
-        del self.net_g, self.cpt
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        self.cpt = None
+            # 强制垃圾回收
+            gc.collect()
+
+            logger.info("模型和显存已完全清理")
+        except Exception as e:
+            logger.error(f"清理模型时出错: {e}")
 
     def load_model(self, weight_root):
         """
