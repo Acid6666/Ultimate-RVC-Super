@@ -105,6 +105,8 @@ def render(total_config: TotalConfig, cookiefile: str | None = None) -> None:
                 tab_config.output_sr.instance,
                 tab_config.output_format.instance,
                 tab_config.output_name.instance,
+                tab_config.n_semitones_instrumentals.instance,
+                tab_config.n_semitones_backup_vocals.instance,
             ],
             outputs=[song_cover, *tab_config.intermediate_audio.all],
             concurrency_limit=1,
@@ -150,6 +152,8 @@ def render(total_config: TotalConfig, cookiefile: str | None = None) -> None:
                 tab_config.output_sr.value,
                 tab_config.output_format.value,
                 tab_config.show_intermediate_audio.value,
+                tab_config.n_semitones_instrumentals.value,
+                tab_config.n_semitones_backup_vocals.value,
             ],
             outputs=[
                 tab_config.n_octaves.instance,
@@ -177,6 +181,8 @@ def render(total_config: TotalConfig, cookiefile: str | None = None) -> None:
                 tab_config.output_sr.instance,
                 tab_config.output_format.instance,
                 tab_config.show_intermediate_audio.instance,
+                tab_config.n_semitones_instrumentals.instance,
+                tab_config.n_semitones_backup_vocals.instance,
             ],
             show_progress="hidden",
         )
@@ -227,6 +233,9 @@ def _render_main_options(tab_config: OneClickSongGenerationConfig) -> None:
     with gr.Row():
         tab_config.n_octaves.instantiate()
         tab_config.n_semitones.instantiate()
+    with gr.Row():
+        tab_config.n_semitones_instrumentals.instantiate()
+        tab_config.n_semitones_backup_vocals.instantiate()
 
 
 def _render_conversion_options(tab_config: OneClickSongGenerationConfig) -> None:

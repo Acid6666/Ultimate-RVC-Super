@@ -131,6 +131,18 @@ class OneClickSongGenerationConfig(SongGenerationConfig):
     n_semitones : SliderConfig
         Configuration settings for a semitone pitch shift slider
         component.
+    n_semitones_instrumentals : SliderConfig
+        Configuration settings for a semitone pitch shift slider
+        applied to the instrumentals. A value of ``None`` means "follow
+        the overall pitch shift". Set to ``0`` to keep the
+        accompaniment at its original pitch while only shifting the
+        vocals.
+    n_semitones_backup_vocals : SliderConfig
+        Configuration settings for a semitone pitch shift slider
+        applied to the backup vocals. A value of ``None`` means "follow
+        the overall pitch shift". Set to ``0`` to keep the backup
+        vocals at their original pitch while only shifting the main
+        vocals.
     show_intermediate_audio : CheckboxConfig
         Configuration settings for a show intermediate audio checkbox
         component.
@@ -157,7 +169,26 @@ class OneClickSongGenerationConfig(SongGenerationConfig):
         label="Overall pitch shift",
         info=(
             "The number of semi-tones to shift the pitch of the converted vocals,"
-            " instrumentals and backup vocals by."
+            " instrumentals and backup vocals by. Overridden by the per-track pitch"
+            " shifts below when those are set to a non-null value."
+        ),
+    )
+    n_semitones_instrumentals: SliderConfig = SliderConfig.semitone_shift(
+        label="Instrumental pitch shift",
+        info=(
+            "Independent pitch shift for the instrumentals. Defaults to 0, which keeps"
+            " the accompaniment at its original pitch while only the vocals are"
+            " changed. Set to a non-zero value to shift the accompaniment separately"
+            " from the vocals."
+        ),
+    )
+    n_semitones_backup_vocals: SliderConfig = SliderConfig.semitone_shift(
+        label="Backup vocal pitch shift",
+        info=(
+            "Independent pitch shift for the backup vocals. Defaults to 0, which keeps"
+            " them at their original pitch while only the main vocals are changed."
+            " Set to a non-zero value to shift the backup vocals separately from the"
+            " main vocals."
         ),
     )
     show_intermediate_audio: CheckboxConfig = CheckboxConfig(

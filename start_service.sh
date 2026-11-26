@@ -43,7 +43,7 @@ echo "启动 RVC 服务..."
 echo ""
 
 # 启动服务
-cd /data/lizilong/ultimate-rvc
+cd "$(dirname "$0")"
 
 # 可以通过环境变量配置
 # URVC_CONFIG: 配置文件名称
@@ -56,7 +56,7 @@ export LISTEN_PORT=${LISTEN_PORT:-7860}
 # 启动服务
 python3 -m ultimate_rvc.web.main \
     --listen \
-    --listen-host 172.22.14.2 \
+    --listen-host "${URVC_GRADIO_HOST:-127.0.0.1}" \
     --listen-port $LISTEN_PORT
 
 echo ""

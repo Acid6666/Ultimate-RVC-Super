@@ -30,6 +30,36 @@ Courtesy of [Social & Apps](https://www.youtube.com/@socialapps1194)
 * A redistributable package on PyPI, which allows you to easily access the Ultimate RVC project from any Python 3.13 environment.
 * Support for saving and loading of custom configurations for the Ultimate RVC web application. This allows you to easily switch between different configurations without having to manually change settings each time.
 
+## Custom additions in this fork
+
+### FastAPI gateway with on-demand GPU leasing
+
+`urvc_fastapi.py` is a FastAPI gateway that starts the Gradio app only when a request
+arrives, leases a GPU from an external manager at `127.0.0.1:7050`, and releases it
+after the configured idle timeout. `gpu_client.py` and `gradio_pool.py` implement the
+lease and process lifecycle. On Linux, start everything with `./run.sh` (or install the
+`urvc.service` systemd unit). `start_service.sh` remains as the simpler, direct Gradio
+launcher.
+
+The gateway listens on `127.0.0.1:7866` by default. Set `URVC_GATEWAY_HOST` /
+`URVC_GATEWAY_PORT` and `URVC_GRADIO_HOST` / `URVC_GRADIO_PORT` to change the bind
+addresses; the defaults are loopback-only and safe to expose through a reverse proxy.
+
+### Importing models from Quark Drive (夸克网盘)
+
+The **Models → Quark Drive** tab can search your whole Quark Drive by keyword, browse
+folders, or resolve share links, then download selected `.pth` / `.index` / `.zip`
+files and install them as voice models.
+
+1. Open **Settings → Quark Drive**, paste the `Cookie` header copied from a
+   `drive.quark.cn` request in your browser's developer tools, and save it.
+2. Open **Models → Quark Drive**, enter a keyword and click **List files**.
+3. Select the files you want, enter a model name, and click **Download as model**.
+
+The cookie is stored locally in `config/quark_cookie.json` with `0600` permissions and
+is excluded from version control. This integration uses Quark's private web endpoints
+rather than an official API, so it may stop working if those endpoints change.
+
 ## Online Platforms
 
 For those without a powerful enough NVIDIA GPU, you may try out Ultimate RV using [Google Colab](https://colab.research.google.com/github/JackismyShephard/ultimate-rvc/blob/main/notebooks/ultimate_rvc_colab.ipynb). Additionally, Ultimate RVC is also hosted on [Huggingface Spaces](https://huggingface.co/spaces/JackismyShephard/ultimate-rvc), although GPU acceleration is not available there. For those who want to run Ultimate RVC locally, follow the setup guide below.
@@ -67,6 +97,27 @@ cd ultimate-rvc
 ```
 
 Note that on Linux, this command will install the CUDA 12.8 toolkit system-wide, if it is not already available. In case you have problems, you may need to install the toolkit manually.
+
+#### Using Aliyun mirrors (for users in China)
+
+If `astral.sh`, `pypi.org` or `download.pytorch.org` are slow or blocked, install `uv` from
+the Aliyun PyPI mirror and set these variables **before** running `./urvc install`:
+
+```bash
+python3 -m pip install uv==0.9.11 -i https://mirrors.aliyun.com/pypi/simple/
+export UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+export UV_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cu128/
+./urvc install
+```
+
+All Python packages (including the bundled Node.js binary from `nodejs-wheel-binaries`)
+then come from Aliyun, and the CUDA 12.8 PyTorch wheels come from Aliyun's
+`pytorch-wheels/cu128` mirror. `./urvc` skips its own `astral.sh` download whenever `uv`
+is already installed.
+
+Aliyun does not mirror GitHub repository clones or NVIDIA's CUDA apt repository. If
+those two steps are slow, use your own accelerator or install CUDA 12.8 from a local
+installer; the Python dependency installation itself no longer needs overseas access.
 
 ### Start the app
 
@@ -137,6 +188,12 @@ The package can be installed with CUDA support using pip in a **Python 3.12-3.13
 pip install ultimate-rvc[cuda] --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
+With Aliyun mirrors:
+
+```console
+pip install ultimate-rvc[cuda] -i https://mirrors.aliyun.com/pypi/simple/ -f https://mirrors.aliyun.com/pytorch-wheels/cu128/
+```
+
 ### CLI Usage
 
 The `ultimate-rvc` package can be used as a Python library but is primarily intended to be used as a command line tool. The package exposes two top-level commands:
@@ -163,6 +220,15 @@ The behaviour of the Ultimate RVC project can be customized via a number of envi
 * `URVC_ACCELERATOR`: The type of hardware accelerator to use when running Ultimate RVC directly via the shell scripts in this repository. Currently supported options are `cuda` and `rocm`, with `cuda` being the default. Note that `rocm` is not supported on Windows and experimental on linux.
 * `URVC_CONFIG`: The name of a configuration with custom values for settings to load when starting the Ultimate RVC web application. If not set, the default configuration for Ultimate RVC will be used. The configuration should be located in the `configs` directory of the Ultimate RVC project. If it does not exist, an error will be raised.
 * `NODE_PATH`: The path to custom Node.js installation to use when running the Ultimate RVC web application and downloading from YouTube. If not set, a default Node.js installation bundled with Ultimate RVC will be used.
+* `URVC_GATEWAY_HOST` / `URVC_GATEWAY_PORT`: Bind address and port of the FastAPI gateway. Defaults to `127.0.0.1:7866`.
+* `URVC_GRADIO_HOST` / `URVC_GRADIO_PORT`: Address and port used by the gateway to reach Gradio. Defaults to `127.0.0.1:7865`.
+* `URVC_GPU_MANAGER_URL`: Base URL of the external GPU manager. Defaults to `http://127.0.0.1:7050`.
+* `URVC_GPU_COUNT` / `URVC_GPU_HEARTBEAT_INTERVAL`: Number of GPUs to lease per task and heartbeat interval in seconds. Defaults to `1` and `60`.
+* `URVC_IDLE_TIMEOUT`: Seconds of inactivity after which the gateway stops Gradio and releases the GPU. Defaults to `600`.
+* `URVC_GRADIO_MANAGED` / `URVC_GRADIO_PERSISTENT`: Set to `1` (default) to let the gateway manage the Gradio process, optionally keeping it alive while returning the GPU lease.
+* `URVC_GRADIO_IDLE_TIMEOUT`: Gradio's own idle cleanup timeout in seconds. Defaults to `0` (disabled) so cleanup happens only when the gateway confirms there are no active tasks.
+* `URVC_CONTROL_PORT`: Local control port used to trigger model unloading inside the Gradio process. Defaults to `7867`.
+* `URVC_GRADIO_STARTUP_TIMEOUT`: Seconds to wait for Gradio to become ready. Defaults to `300`.
 
 ## Help & Community
 

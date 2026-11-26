@@ -13,6 +13,11 @@ from ultimate_rvc.core.manage.config import (
     delete_configs,
     get_config_names,
 )
+from ultimate_rvc.core.manage.quark import (
+    clear_quark_cookie,
+    has_quark_cookie,
+    save_quark_cookie,
+)
 from ultimate_rvc.core.manage.settings import delete_temp_files
 from ultimate_rvc.web.common import (
     confirm_box_js,
@@ -29,7 +34,7 @@ if TYPE_CHECKING:
     from ultimate_rvc.web.config.main import SettingsManagementConfig, TotalConfig
 
 
-def render(total_config: TotalConfig) -> None:
+def render(total_config: TotalConfig, quark_status: gr.Textbox | None = None) -> None:
     """
     Render "Settings" tab.
 
@@ -43,6 +48,7 @@ def render(total_config: TotalConfig) -> None:
     tab_config.dummy_checkbox.instantiate()
     _render_config_files_tab(tab_config, total_config)
     _render_temp_files_tab(tab_config)
+    _render_quark_cookie_tab(quark_status)
 
 
 def _render_config_files_tab(
@@ -168,4 +174,59 @@ def _render_temp_files_tab(tab_config: SettingsManagementConfig) -> None:
             ),
             outputs=temporary_files_msg,
             show_progress="hidden",
+        )
+
+
+def _render_quark_cookie_tab(quark_status: gr.Textbox | None = None) -> None:
+    """Render the Quark Drive cookie configuration section."""
+    configured = has_quark_cookie()
+    with gr.Accordion("Quark Drive", open=False):
+        gr.Markdown(
+            "获取方式：浏览器登录 `pan.quark.cn` → F12 打开开发者工具 → "
+            "Network → 刷新页面 → 点任意发往 `drive.quark.cn` 的请求 → "
+            "复制请求头中的完整 `Cookie` 并粘贴到下方。\n\n"
+            "Cookie 仅保存在本地 `config/quark_cookie.json`（权限 600），"
+            "过期后重新粘贴即可。",
+        )
+        status = gr.Textbox(
+            label="状态",
+            value="已配置" if configured else "未配置",
+            interactive=False,
+        )
+        cookie_box = gr.Textbox(
+            label="Cookie",
+            type="password",
+            placeholder="已配置时留空表示不修改" if configured else "粘贴完整 Cookie",
+        )
+        with gr.Row():
+            save_btn = gr.Button("保存 Cookie", variant="primary")
+            clear_btn = gr.Button("清除 Cookie", variant="secondary")
+        msg = gr.Textbox(label="输出信息", interactive=False)
+
+        save_outputs = [msg, status, cookie_box]
+        clear_outputs = [msg, status, cookie_box]
+        if quark_status is not None:
+            save_outputs.append(quark_status)
+            clear_outputs.append(quark_status)
+
+        def _save(cookie: str) -> tuple[str, ...]:
+            message = save_quark_cookie(cookie)
+            result = (message, "已配置", "")
+            return (*result, "已配置") if quark_status is not None else result
+
+        def _clear() -> tuple[str, ...]:
+            message = clear_quark_cookie()
+            result = (message, "未配置", "")
+            return (*result, "未配置") if quark_status is not None else result
+
+        save_btn.click(
+            exception_harness(_save),
+            inputs=cookie_box,
+            outputs=save_outputs,
+            api_name="quark_save_cookie",
+        )
+        clear_btn.click(
+            exception_harness(_clear),
+            outputs=clear_outputs,
+            api_name="quark_clear_cookie",
         )

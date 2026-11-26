@@ -57,7 +57,7 @@ dependencies = [
   "pedalboard==0.9.19",
   "audio-separator[gpu]==0.40.0",
   "noisereduce==3.0.3",
-  "edge-tts==7.2.7",
+  "edge-tts==7.3.1",
   # TODO potentially add these later
   # below package outcommented until we use dio,pm and harvest
   #"pyworld-fixed==0.3.8",
@@ -249,7 +249,7 @@ max-doc-length = 72
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

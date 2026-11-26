@@ -934,6 +934,8 @@ def run_pipeline(
     output_sr: int = 44100,
     output_format: AudioExt = AudioExt.MP3,
     output_name: str | None = None,
+    n_semitones_instrumentals: int | None = None,
+    n_semitones_backup_vocals: int | None = None,
     cookiefile: StrPath | None = None,
     progress_bar: gr.Progress | None = None,
 ) -> tuple[Path, ...]:
@@ -1012,6 +1014,12 @@ def run_pipeline(
         The audio format of the song cover.
     output_name : str, optional
         The name of the song cover.
+    n_semitones_instrumentals : int, optional
+        The number of semi-tones to pitch-shift the instrumentals by.
+        If ``None``, the value of ``n_semitones`` is used.
+    n_semitones_backup_vocals : int, optional
+        The number of semi-tones to pitch-shift the backup vocals by.
+        If ``None``, the value of ``n_semitones`` is used.
     cookiefile : StrPath, optional
         The path to a file containing cookies to use when downloading
         audio from Youtube.
@@ -1087,17 +1095,29 @@ def run_pipeline(
         dry_level,
         damping,
     )
+    # NOTE: By default, instrumentals and backup vocals follow the
+    # `n_semitones` shift applied to the converted vocals. Passing
+    # `n_semitones_instrumentals` / `n_semitones_backup_vocals`
+    # explicitly (including 0) overrides this behaviour, which lets
+    # callers keep the accompaniment at its original pitch while only
+    # shifting the vocals.
+    inst_shift = (
+        n_semitones if n_semitones_instrumentals is None else n_semitones_instrumentals
+    )
+    backup_shift = (
+        n_semitones if n_semitones_backup_vocals is None else n_semitones_backup_vocals
+    )
     display_progress("[~] Pitch-shifting instrumentals...", 6 / 9, progress_bar)
     shifted_instrumentals_track = pitch_shift(
         instrumentals_track,
         song_dir,
-        n_semitones,
+        inst_shift,
     )
     display_progress("[~] Pitch-shifting backup vocals...", 7 / 9, progress_bar)
     shifted_backup_vocals_track = pitch_shift(
         backup_vocals_track,
         song_dir,
-        n_semitones,
+        backup_shift,
     )
 
     song_cover = mix_song(

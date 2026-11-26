@@ -182,6 +182,20 @@ def get_edge_tts_voice_names() -> list[str]:
     return [voice[keys.index("ShortName")] for voice in voices]
 
 
+def _text_is_chinese(text: str) -> bool:
+    """Return whether the text consists predominantly of Chinese characters."""
+    chars = [char for char in text if not char.isspace()]
+    if not chars:
+        return False
+    chinese_chars = sum("\u4e00" <= char <= "\u9fff" for char in chars)
+    return chinese_chars / len(chars) >= 0.6
+
+
+def _voice_supports_chinese(voice: str) -> bool:
+    """Return whether the given Edge TTS voice natively supports Chinese."""
+    return voice.lower().startswith("zh-") or "multilingual" in voice.lower()
+
+
 def run_edge_tts(
     source: str,
     voice: str = "en-US-ChristopherNeural",
@@ -264,15 +278,32 @@ def run_edge_tts(
         speed_change_str = f"{speed_change:+}%"
         volume_change_str = f"{volume_change:+}%"
 
-        communicate = edge_tts.Communicate(
-            text,
-            voice,
-            pitch=pitch_shift_str,
-            rate=speed_change_str,
-            volume=volume_change_str,
-        )
+        def synthesize(voice_name: str) -> None:
+            edge_tts.Communicate(
+                text,
+                voice_name,
+                pitch=pitch_shift_str,
+                rate=speed_change_str,
+                volume=volume_change_str,
+            ).save_sync(str(converted_audio_path))
 
-        communicate.save_sync(str(converted_audio_path))
+        fallback_voice = (
+            "zh-CN-XiaoxiaoNeural"
+            if _text_is_chinese(text) and not _voice_supports_chinese(voice)
+            else None
+        )
+        try:
+            synthesize(voice)
+        except edge_tts.exceptions.NoAudioReceived:
+            if fallback_voice is None:
+                raise
+            logger.warning(
+                "Edge TTS 音色 %s 无法朗读中文文本，改用 %s",
+                voice,
+                fallback_voice,
+            )
+            args_dict["voice"] = fallback_voice
+            synthesize(fallback_voice)
 
         json_dump(args_dict, converted_audio_json_path)
 

@@ -61,7 +61,9 @@ cookiefile = os.environ.get("YT_COOKIEFILE")
 total_config = load_config(config_name, TotalConfig) if config_name else TotalConfig()
 
 # 空闲超时监控配置
-IDLE_TIMEOUT = 300  # 5分钟 = 300秒
+# <=0 表示关闭 Gradio 自带的空闲清理，改由 FastAPI 网关在确认无活跃任务后
+# 通过 /_cleanup_memory 端点主动触发（避免长任务进行中被卸载模型打断）
+IDLE_TIMEOUT = int(os.environ.get("URVC_GRADIO_IDLE_TIMEOUT", "300"))
 last_request_time = None
 timeout_thread = None
 should_stop_timeout = False
@@ -181,6 +183,18 @@ def timeout_monitor():
         logger.info("超时监控线程已停止")
 
 
+def _cleanup_memory_endpoint() -> str:
+    """
+    Maintenance endpoint invoked by the FastAPI gateway.
+
+    Unloads the cached voice conversion model and frees the CUDA cache so
+    that VRAM is released while the Gradio process itself stays online.
+    """
+    cleanup_memory()
+    update_last_request_time()
+    return "ok"
+
+
 def render_app() -> gr.Blocks:
     """
     Render the Ultimate RVC web application.
@@ -255,11 +269,11 @@ def render_app() -> gr.Blocks:
                 render_speech_one_click_tab(total_config)
                 render_speech_multi_step_tab(total_config)
         with gr.Tab("Models", elem_id="manage-tab"):
-            render_models_tab(total_config)
+            quark_status = render_models_tab(total_config)
         with gr.Tab("Audio", elem_id="audio-tab"):
             render_audio_tab(total_config)
         with gr.Tab("Settings", elem_id="settings-tab"):
-            render_settings_tab(total_config)
+            render_settings_tab(total_config, quark_status)
 
         app.load(
             _init_dropdowns,
@@ -300,6 +314,8 @@ def render_app() -> gr.Blocks:
             ],
             show_progress="hidden",
         )
+        # 模型卸载由独立的本地控制服务触发（见 _start_control_server），
+        # 这样既不必新增 UI 组件，也不会影响既有端点的自动编号。
     return app
 
 
@@ -374,6 +390,49 @@ app = render_app()
 app_wrapper = typer.Typer()
 
 
+def _start_control_server() -> None:
+    """
+    Start a minimal HTTP control plane used by the FastAPI gateway.
+
+    Gradio only turns a function into an API endpoint when it is attached
+    to a UI component, and adding components risks shifting the generated
+    ``api_name`` of the existing endpoints. A tiny standalone server is
+    therefore used instead. It listens on localhost only.
+
+    * ``POST /cleanup`` - unload the cached model and free VRAM
+    """
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    port = int(os.environ.get("URVC_CONTROL_PORT", "7867"))
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path.rstrip("/") == "/cleanup":
+                _cleanup_memory_endpoint()
+                payload, status = b'{"ok": true}', 200
+            else:
+                payload, status = b'{"ok": false, "msg": "not found"}', 404
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, fmt: str, *args: object) -> None:
+            if logger:
+                logger.info("control %s", fmt % args)
+
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
+    except OSError as exc:
+        if logger:
+            logger.error("控制服务启动失败 (端口 %s): %s", port, exc)
+        return
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    if logger:
+        logger.info("控制服务已启动: http://127.0.0.1:%s/cleanup", port)
+
+
 @app_wrapper.command()
 def start_app(
     share: Annotated[
@@ -415,19 +474,29 @@ def start_app(
     """Run the Ultimate RVC web application."""
     global timeout_thread
 
-    # 启动超时监控线程
-    timeout_thread = threading.Thread(target=timeout_monitor, daemon=True)
-    timeout_thread.start()
+    # 启动超时监控线程（IDLE_TIMEOUT<=0 时交由网关按需触发清理，
+    # 避免长时间推理过程中被自动清理打断）
+    if IDLE_TIMEOUT > 0:
+        timeout_thread = threading.Thread(target=timeout_monitor, daemon=True)
+        timeout_thread.start()
 
-    if logger:
-        logger.info(f"Ultimate RVC 服务已启动，空闲超时: {IDLE_TIMEOUT} 秒")
+        if logger:
+            logger.info(f"Ultimate RVC 服务已启动，空闲超时: {IDLE_TIMEOUT} 秒")
+    else:
+        if logger:
+            logger.info("Ultimate RVC 服务已启动，空闲清理交由网关控制")
 
+    _start_control_server()
     os.environ["GRADIO_TEMP_DIR"] = str(TEMP_DIR)
     gr.set_static_paths([MODELS_DIR, AUDIO_DIR])
     app.queue()
     app.launch(
         share=share,
-        server_name=(None if not listen else (listen_host or "172.22.14.2")),  # noqa: S104
+        server_name=(
+            None
+            if not listen
+            else (listen_host or os.environ.get("URVC_GRADIO_HOST", "127.0.0.1"))
+        ),
         server_port=listen_port,
         ssr_mode=ssr_mode,
     )

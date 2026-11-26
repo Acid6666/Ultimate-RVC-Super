@@ -43,6 +43,7 @@ from ultimate_rvc.web.common import (
     update_dropdowns,
 )
 from ultimate_rvc.web.config.event import ManageModelEventState
+from ultimate_rvc.web.tabs.manage.quark import render as render_quark_tab
 from ultimate_rvc.web.tabs.train.multi_step_generation import (
     render as _render_train_multi_step_tab,
 )
@@ -69,6 +70,7 @@ def render(total_config: TotalConfig) -> None:
 
     _render_download_tab(event_state)
     _render_upload_tab(event_state)
+    quark_status = render_quark_tab(total_config)
     with gr.Tab("Train", elem_id="train-tab"):
         _render_train_multi_step_tab(total_config)
     _render_delete_tab(tab_config, event_state)
@@ -147,6 +149,7 @@ def render(total_config: TotalConfig) -> None:
             ],
             show_progress="hidden",
         )
+    return quark_status
 
 
 def _render_download_tab(event_state: ManageModelEventState) -> None:

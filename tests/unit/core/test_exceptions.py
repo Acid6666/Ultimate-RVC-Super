@@ -572,7 +572,7 @@ class TestIncompatiblePretrainedModelError:
         assert (
             str(error)
             == "Pretrained model with name 'test_model' is incompatible with sample"
-            " rate 44000."
+            " rate 40000."
         )
 
     @pytest.mark.parametrize(
